@@ -26,6 +26,7 @@ import java.util.logging.Logger;
 
 import org.eclipse.birt.core.data.DataType;
 import org.eclipse.birt.core.data.DataTypeUtil;
+import org.eclipse.birt.core.exception.BirtException;
 import org.eclipse.birt.data.engine.api.DataEngineContext;
 import org.eclipse.birt.data.engine.api.IColumnDefinition;
 import org.eclipse.birt.data.engine.api.IOdaDataSetDesign;
@@ -46,7 +47,6 @@ import org.eclipse.birt.data.engine.impl.QueryContextVisitorUtil;
 import org.eclipse.birt.data.engine.impl.StopSign;
 import org.eclipse.birt.data.engine.impl.document.viewing.ExprMetaUtil;
 import org.eclipse.birt.data.engine.odaconsumer.ColumnHint;
-import org.eclipse.birt.data.engine.odaconsumer.ExceptionHandler;
 import org.eclipse.birt.data.engine.odaconsumer.ParameterHint;
 import org.eclipse.birt.data.engine.odaconsumer.PreparedStatement;
 import org.eclipse.birt.data.engine.odaconsumer.QuerySpecHelper;
@@ -864,53 +864,94 @@ public class DataSourceQuery extends BaseQuery implements IDataSourceQuery, IPre
 
 		return resultClass;
 	}
-	
-	
-	private IResultClass mergeResultHint ( List modelResultHints, IResultClass meta )
-	{
-		if ( modelResultHints == null || modelResultHints.isEmpty( ) )
-			return meta;
-		IResultClass newResultClass;
-		try
+
+	/**
+	 * Method to fetch the column headers when zero or no records
+	 * 
+	 * @param modelResultHints
+	 * @param list
+	 * @throws BirtException 
+	 */
+	private List<ResultFieldMetadata> columnsHeaderWithNoRecords(List modelResultHints) throws BirtException {
 		{
-			newResultClass = copyResultClass( meta );
-		}
-		catch ( Exception ex )
-		{
-			return meta;
-		}
-		boolean changed = false;
-		int count = newResultClass.getFieldCount( );
-		try
-		{
-			for ( int i = 1; i <= count; i++ )
-			{
-				String fieldName = newResultClass.getFieldName( i );
-				Class odaType = newResultClass.getFieldMetaData( i )
-						.getDataType( );
-				for ( int j = 0; j < modelResultHints.size( ); j++ )
-				{
-					if ( ( (IColumnDefinition) modelResultHints.get( j ) ).getColumnName( )
-							.equals( fieldName ) )
-					{
-						int apiType = ( (IColumnDefinition) modelResultHints.get( j ) ).getDataType( );
-						if ( apiType > 0
-								&& DataTypeUtil.toApiDataType( odaType ) != apiType )
-						{
-							newResultClass.getFieldMetaData( i )
-									.setDataType( DataType.getClass( apiType ) );
-							changed = true;
-						}
-						break;
-					}
+			List<ResultFieldMetadata> list = new ArrayList<ResultFieldMetadata>();
+			for (int i = 0; i < modelResultHints.size(); i++) {
+
+				if (modelResultHints != null && modelResultHints.get(i) != null) {
+
+					int m_driverPosition = i + 1;
+
+					IColumnDefinition column = ((IColumnDefinition) modelResultHints.get(i));
+
+					String m_name = column.getColumnName();
+					String m_label = column.getDisplayName();
+					String m_nativeTypeName = String.valueOf(column.getNativeDataType());
+					Class m_dataType = DataTypeUtil.toOdiTypeClass(column.getAnalysisType());
+					boolean m_isCustom = false;
+					int m_analysisType = column.getAnalysisType();
+					String m_analysisColumn = column.getAnalysisColumn();
+					boolean m_indexColumn = column.isIndexColumn();
+					boolean m_compressedColumn = column.isCompressedColumn();
+
+					ResultFieldMetadata metadata = new ResultFieldMetadata(m_driverPosition, m_name, m_label,
+							m_dataType, m_nativeTypeName, m_isCustom, m_analysisType, m_analysisColumn, m_indexColumn,
+							m_compressedColumn);
+					metadata.setAlias(column.getAlias());
+
+					list.add(metadata);
 				}
 			}
+			return list;
 		}
-		catch ( Exception ex )
-		{
+	}
+	
+	
+	private IResultClass mergeResultHint(List modelResultHints, IResultClass meta) {
+		if (modelResultHints == null || modelResultHints.isEmpty())
+			return meta;
+		IResultClass newResultClass;
+		boolean changed = false;
+		try {
+			if (meta != null && meta.getFieldCount() != 0) {
+				// fetch the results from ResultClass data and assign to Result Class
+				newResultClass = copyResultClass(meta);
+				int count = newResultClass.getFieldCount();
+
+				// Consolidate the ResultClass and modelResultHints data
+				for ( int i = 1; i <= count; i++ )
+				{
+					String fieldName = newResultClass.getFieldName( i );
+					Class odaType = newResultClass.getFieldMetaData( i )
+							.getDataType( );
+					for ( int j = 0; j < modelResultHints.size( ); j++ )
+					{
+						if ( ( (IColumnDefinition) modelResultHints.get( j ) ).getColumnName( )
+								.equals( fieldName ) )
+						{
+							int apiType = ( (IColumnDefinition) modelResultHints.get( j ) ).getDataType( );
+							if ( apiType > 0
+									&& DataTypeUtil.toApiDataType( odaType ) != apiType )
+							{
+								newResultClass.getFieldMetaData( i )
+										.setDataType( DataType.getClass( apiType ) );
+								changed = true;
+							}
+							break;
+						}
+					}
+				}
+
+			} else {
+				// If ResultClass data is empty then fetch column information from modelResultHints
+				List<ResultFieldMetadata> list = columnsHeaderWithNoRecords(modelResultHints);
+				newResultClass = new ResultClass(list);
+				changed = true;
+			}
+		} catch (Exception ex) {
+			return meta;
 		}
-		
-		if( changed )
+
+		if (changed)
 			return newResultClass;
 		else
 			return meta;
